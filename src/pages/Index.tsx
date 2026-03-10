@@ -1,5 +1,7 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import Icon from "@/components/ui/icon";
+
+const API_URL = "https://functions.poehali.dev/9732620a-9c97-49db-afb6-4d6a02bd71f2";
 
 type BlockType = "heading1" | "heading2" | "text" | "todo" | "divider" | "quote" | "callout";
 
@@ -32,25 +34,41 @@ const EMOJIS = ["📝", "🚀", "💡", "🎯", "📌", "🔥", "⭐", "🌊", "
 
 const generateId = () => Math.random().toString(36).slice(2, 9);
 
-const defaultPages: Page[] = [
-  {
-    id: "1",
-    title: "Добро пожаловать",
-    emoji: "🚀",
-    createdAt: new Date(),
-    blocks: [
-      { id: "b1", type: "heading1", content: "Добро пожаловать в Блокнот" },
-      { id: "b2", type: "text", content: "Это твоё рабочее пространство. Здесь можно создавать заметки, задачи и идеи в виде гибких блоков." },
-      { id: "b3", type: "callout", content: "💡 Нажми «+ Добавить блок» чтобы начать создавать контент" },
-      { id: "b4", type: "heading2", content: "Возможности" },
-      { id: "b5", type: "todo", content: "Создать первую заметку", checked: true },
-      { id: "b6", type: "todo", content: "Попробовать разные типы блоков", checked: false },
-      { id: "b7", type: "todo", content: "Организовать свои мысли", checked: false },
-      { id: "b8", type: "divider", content: "" },
-      { id: "b9", type: "quote", content: "Лучший способ начать — просто начать." },
-    ],
-  },
-];
+// ── API helpers ──────────────────────────────────────────────────────────────
+
+async function apiGet(action: string) {
+  const res = await fetch(`${API_URL}?action=${action}`);
+  return res.json();
+}
+
+async function apiPost(action: string, body: object) {
+  const res = await fetch(`${API_URL}?action=${action}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return res.json();
+}
+
+async function apiPut(action: string, body: object) {
+  const res = await fetch(`${API_URL}?action=${action}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return res.json();
+}
+
+async function apiDelete(action: string, body: object) {
+  const res = await fetch(`${API_URL}?action=${action}`, {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return res.json();
+}
+
+// ── Sub-components ───────────────────────────────────────────────────────────
 
 function BlockRenderer({
   block,
@@ -87,7 +105,7 @@ function BlockRenderer({
   if (block.type === "divider") {
     return (
       <div
-        className="group relative py-3 cursor-pointer"
+        className="group relative py-3"
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
       >
@@ -164,17 +182,12 @@ function BlockRenderer({
           onChange={(e) => onUpdate(block.id, { content: e.target.value })}
           onKeyDown={handleKeyDown}
           placeholder={
-            block.type === "heading1"
-              ? "Заголовок..."
-              : block.type === "heading2"
-              ? "Подзаголовок..."
-              : block.type === "quote"
-              ? "Цитата..."
-              : block.type === "callout"
-              ? "Выноска..."
-              : block.type === "todo"
-              ? "Задача..."
-              : "Начни писать..."
+            block.type === "heading1" ? "Заголовок..."
+            : block.type === "heading2" ? "Подзаголовок..."
+            : block.type === "quote" ? "Цитата..."
+            : block.type === "callout" ? "Выноска..."
+            : block.type === "todo" ? "Задача..."
+            : "Начни писать..."
           }
           rows={1}
           className={`w-full bg-transparent resize-none outline-none placeholder:text-white/20 ${textClass} ${
@@ -195,11 +208,7 @@ function EmojiPicker({ onSelect, onClose }: { onSelect: (e: string) => void; onC
     >
       <div className="grid grid-cols-6 gap-1">
         {EMOJIS.map((e) => (
-          <button
-            key={e}
-            onClick={() => { onSelect(e); onClose(); }}
-            className="text-xl p-1.5 rounded-lg hover:bg-white/10 transition-all"
-          >
+          <button key={e} onClick={() => { onSelect(e); onClose(); }} className="text-xl p-1.5 rounded-lg hover:bg-white/10 transition-all">
             {e}
           </button>
         ))}
@@ -221,10 +230,7 @@ function BlockTypePicker({ onSelect, onClose }: { onSelect: (t: BlockType) => vo
           onClick={() => { onSelect(bt.type); onClose(); }}
           className="w-full flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-white/8 transition-all text-left"
         >
-          <div
-            className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
-            style={{ background: "rgba(167,139,250,0.15)" }}
-          >
+          <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: "rgba(167,139,250,0.15)" }}>
             <Icon name={bt.icon} fallback="AlignLeft" size={16} className="text-purple-400" />
           </div>
           <div>
@@ -237,20 +243,56 @@ function BlockTypePicker({ onSelect, onClose }: { onSelect: (t: BlockType) => vo
   );
 }
 
+// ── Main component ───────────────────────────────────────────────────────────
+
 export default function Index() {
-  const [pages, setPages] = useState<Page[]>(defaultPages);
-  const [activePageId, setActivePageId] = useState("1");
+  const [pages, setPages] = useState<Page[]>([]);
+  const [activePageId, setActivePageId] = useState<string | null>(null);
   const [showBlockPicker, setShowBlockPicker] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const activePage = pages.find((p) => p.id === activePageId)!;
+  // ── Load pages on mount ──
+  useEffect(() => {
+    apiGet("get_pages").then((data) => {
+      const loaded: Page[] = (data.pages || []).map((p: Record<string, unknown>) => ({
+        ...p,
+        createdAt: new Date(p.createdAt || Date.now()),
+      }));
+      setPages(loaded);
+      if (loaded.length > 0) setActivePageId(loaded[0].id);
+      setLoading(false);
+    });
+  }, []);
 
-  const updatePage = (id: string, data: Partial<Page>) => {
+  const activePage = pages.find((p) => p.id === activePageId);
+
+  // ── Auto-save blocks with debounce ──
+  const scheduleBlocksSave = useCallback((pageId: string, blocks: Block[]) => {
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    setSaving(true);
+    saveTimer.current = setTimeout(async () => {
+      await apiPost("save_blocks", { page_id: pageId, blocks });
+      setSaving(false);
+    }, 1000);
+  }, []);
+
+  const updatePage = async (id: string, data: Partial<Page>) => {
     setPages((prev) => prev.map((p) => (p.id === id ? { ...p, ...data } : p)));
+    if (data.title !== undefined || data.emoji !== undefined) {
+      const page = pages.find((p) => p.id === id)!;
+      await apiPut("update_page", {
+        id,
+        title: data.title ?? page.title,
+        emoji: data.emoji ?? page.emoji,
+      });
+    }
   };
 
-  const createPage = () => {
+  const createPage = async () => {
     const newPage: Page = {
       id: generateId(),
       title: "Без названия",
@@ -260,13 +302,20 @@ export default function Index() {
     };
     setPages((prev) => [...prev, newPage]);
     setActivePageId(newPage.id);
+    await apiPost("create_page", {
+      id: newPage.id,
+      title: newPage.title,
+      emoji: newPage.emoji,
+      blocks: newPage.blocks,
+    });
   };
 
-  const deletePage = (id: string) => {
+  const deletePage = async (id: string) => {
     if (pages.length === 1) return;
     const remaining = pages.filter((p) => p.id !== id);
     setPages(remaining);
     if (activePageId === id) setActivePageId(remaining[0].id);
+    await apiDelete("delete_page", { id });
   };
 
   const addBlock = (type: BlockType, afterId?: string) => {
@@ -274,10 +323,15 @@ export default function Index() {
     setPages((prev) =>
       prev.map((p) => {
         if (p.id !== activePageId) return p;
-        if (!afterId) return { ...p, blocks: [...p.blocks, newBlock] };
-        const idx = p.blocks.findIndex((b) => b.id === afterId);
-        const newBlocks = [...p.blocks];
-        newBlocks.splice(idx + 1, 0, newBlock);
+        let newBlocks: Block[];
+        if (!afterId) {
+          newBlocks = [...p.blocks, newBlock];
+        } else {
+          const idx = p.blocks.findIndex((b) => b.id === afterId);
+          newBlocks = [...p.blocks];
+          newBlocks.splice(idx + 1, 0, newBlock);
+        }
+        scheduleBlocksSave(p.id, newBlocks);
         return { ...p, blocks: newBlocks };
       })
     );
@@ -285,23 +339,60 @@ export default function Index() {
 
   const updateBlock = (blockId: string, data: Partial<Block>) => {
     setPages((prev) =>
-      prev.map((p) =>
-        p.id !== activePageId
-          ? p
-          : { ...p, blocks: p.blocks.map((b) => (b.id === blockId ? { ...b, ...data } : b)) }
-      )
+      prev.map((p) => {
+        if (p.id !== activePageId) return p;
+        const newBlocks = p.blocks.map((b) => (b.id === blockId ? { ...b, ...data } : b));
+        scheduleBlocksSave(p.id, newBlocks);
+        return { ...p, blocks: newBlocks };
+      })
     );
   };
 
   const deleteBlock = (blockId: string) => {
     setPages((prev) =>
-      prev.map((p) =>
-        p.id !== activePageId
-          ? p
-          : { ...p, blocks: p.blocks.filter((b) => b.id !== blockId) }
-      )
+      prev.map((p) => {
+        if (p.id !== activePageId) return p;
+        const newBlocks = p.blocks.filter((b) => b.id !== blockId);
+        scheduleBlocksSave(p.id, newBlocks);
+        return { ...p, blocks: newBlocks };
+      })
     );
   };
+
+  // ── Render ───────────────────────────────────────────────────────────────
+
+  if (loading) {
+    return (
+      <div className="flex h-screen items-center justify-center" style={{ background: "hsl(230,20%,7%)" }}>
+        <div className="flex flex-col items-center gap-4 animate-fade-in">
+          <div
+            className="w-12 h-12 rounded-2xl flex items-center justify-center pulse-glow"
+            style={{ background: "linear-gradient(135deg, #a78bfa, #22d3ee)" }}
+          >
+            <Icon name="Sparkles" size={22} className="text-white" />
+          </div>
+          <p className="text-white/40 text-sm">Загружаю заметки...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!activePage) {
+    return (
+      <div className="flex h-screen items-center justify-center" style={{ background: "hsl(230,20%,7%)" }}>
+        <div className="text-center animate-fade-in">
+          <p className="text-white/40 mb-4">Нет страниц</p>
+          <button
+            onClick={createPage}
+            className="px-6 py-3 rounded-xl text-white text-sm font-medium"
+            style={{ background: "linear-gradient(135deg, #a78bfa, #22d3ee)" }}
+          >
+            Создать первую страницу
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-screen overflow-hidden" style={{ background: "hsl(230,20%,7%)" }}>
@@ -313,10 +404,7 @@ export default function Index() {
         style={{ background: "hsl(230,22%,5%)" }}
       >
         <div className="flex items-center gap-2 px-4 py-5 border-b border-white/5">
-          <div
-            className="w-7 h-7 rounded-lg flex items-center justify-center"
-            style={{ background: "linear-gradient(135deg, #a78bfa, #22d3ee)" }}
-          >
+          <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: "linear-gradient(135deg, #a78bfa, #22d3ee)" }}>
             <Icon name="Sparkles" size={14} className="text-white" />
           </div>
           <span className="font-montserrat font-bold text-white/90 text-sm tracking-wide">Блокнот</span>
@@ -334,10 +422,7 @@ export default function Index() {
                   }`}
                   style={
                     activePageId === page.id
-                      ? {
-                          background: "linear-gradient(135deg, rgba(167,139,250,0.18), rgba(34,211,238,0.08))",
-                          boxShadow: "inset 0 0 0 1px rgba(167,139,250,0.2)",
-                        }
+                      ? { background: "linear-gradient(135deg, rgba(167,139,250,0.18), rgba(34,211,238,0.08))", boxShadow: "inset 0 0 0 1px rgba(167,139,250,0.2)" }
                       : {}
                   }
                 >
@@ -370,23 +455,30 @@ export default function Index() {
 
       {/* Main */}
       <main className="flex-1 flex flex-col overflow-hidden">
-        <div
-          className="flex items-center gap-3 px-6 py-4 border-b border-white/5 flex-shrink-0"
-          style={{ background: "rgba(0,0,0,0.2)" }}
-        >
+        <div className="flex items-center gap-3 px-6 py-4 border-b border-white/5 flex-shrink-0" style={{ background: "rgba(0,0,0,0.2)" }}>
           <button
             onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
             className="w-8 h-8 rounded-xl flex items-center justify-center text-white/30 hover:text-white/70 hover:bg-white/8 transition-all"
           >
             <Icon name={sidebarCollapsed ? "PanelLeftOpen" : "PanelLeftClose"} size={18} />
           </button>
-          <div className="flex items-center gap-1 text-white/25 text-sm">
+          <div className="flex items-center gap-1 text-white/25 text-sm flex-1">
             <span>Блокнот</span>
             <Icon name="ChevronRight" size={14} />
-            <span className="text-white/60">
-              {activePage.emoji} {activePage.title}
-            </span>
+            <span className="text-white/60">{activePage.emoji} {activePage.title}</span>
           </div>
+          {saving && (
+            <div className="flex items-center gap-1.5 text-xs text-white/30 animate-fade-in">
+              <Icon name="Cloud" size={13} />
+              <span>Сохраняю...</span>
+            </div>
+          )}
+          {!saving && (
+            <div className="flex items-center gap-1.5 text-xs text-white/20">
+              <Icon name="CloudCheck" fallback="Check" size={13} />
+              <span>Сохранено</span>
+            </div>
+          )}
         </div>
 
         <div className="flex-1 overflow-y-auto">
@@ -402,7 +494,7 @@ export default function Index() {
                 </button>
                 {showEmojiPicker && (
                   <EmojiPicker
-                    onSelect={(e) => updatePage(activePageId, { emoji: e })}
+                    onSelect={(e) => { updatePage(activePageId!, { emoji: e }); setShowEmojiPicker(false); }}
                     onClose={() => setShowEmojiPicker(false)}
                   />
                 )}
@@ -410,16 +502,12 @@ export default function Index() {
 
               <input
                 value={activePage.title}
-                onChange={(e) => updatePage(activePageId, { title: e.target.value })}
+                onChange={(e) => updatePage(activePageId!, { title: e.target.value })}
                 placeholder="Без названия"
                 className="w-full bg-transparent outline-none text-4xl font-bold font-montserrat text-white placeholder:text-white/15 mb-1"
               />
               <p className="text-xs text-white/20">
-                {activePage.createdAt.toLocaleDateString("ru-RU", {
-                  day: "numeric",
-                  month: "long",
-                  year: "numeric",
-                })}
+                {activePage.createdAt.toLocaleDateString("ru-RU", { day: "numeric", month: "long", year: "numeric" })}
               </p>
             </div>
 
@@ -444,10 +532,7 @@ export default function Index() {
                 className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-white/30 hover:text-white/70 transition-all border border-dashed border-white/10 hover:border-purple-400/40 w-full justify-center"
                 style={showBlockPicker ? { background: "rgba(167,139,250,0.06)" } : {}}
               >
-                <div
-                  className="w-5 h-5 rounded-full flex items-center justify-center"
-                  style={{ background: "rgba(167,139,250,0.2)" }}
-                >
+                <div className="w-5 h-5 rounded-full flex items-center justify-center" style={{ background: "rgba(167,139,250,0.2)" }}>
                   <Icon name="Plus" size={12} className="text-purple-400" />
                 </div>
                 <span className="text-sm">Добавить блок</span>
@@ -469,11 +554,7 @@ export default function Index() {
                 {activePage.blocks.filter((b) => b.type === "todo").length} задач
               </span>
               <span>
-                {activePage.blocks.reduce(
-                  (acc, b) => acc + b.content.split(" ").filter(Boolean).length,
-                  0
-                )}{" "}
-                слов
+                {activePage.blocks.reduce((acc, b) => acc + b.content.split(" ").filter(Boolean).length, 0)} слов
               </span>
             </div>
           </div>

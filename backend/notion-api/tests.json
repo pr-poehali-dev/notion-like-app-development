@@ -1,0 +1,12 @@
+{
+  "tests": [
+    {
+      "name": "Get pages (empty)",
+      "method": "GET",
+      "path": "/?action=get_pages",
+      "expectedStatus": 200,
+      "expectedBody": {"pages": []},
+      "bodyMatcher": "partial"
+    }
+  ]
+}
